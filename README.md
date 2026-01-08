@@ -161,6 +161,9 @@ yousummary summarize 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' 'openai/gpt-4
 # Using Anthropic
 export ANTHROPIC_API_KEY='your-key'
 yousummary summarize 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' 'anthropic/claude-3-haiku-20240307'
+
+# Save to a specific file
+yousummary summarize 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' 'ollama/llama3.2:3b' -o my-summary.md
 ```
 
 ### Summarize from pre-fetched JSON
@@ -242,7 +245,8 @@ Options:
       --key-points-only        Generate key points only (no full summary)
       --with-key-points        Include key points in addition to summary
       --print-only             Print to stdout only, don't save to file
-  -o, --output-dir <DIR>       Output directory for saved summaries
+  -d, --output-dir <DIR>       Output directory for saved summaries
+  -o, --output <FILE>          Output file path (for single video)
       --host <HOST>            Ollama host URL [default: http://localhost:11434]
   -f, --force                  Force regeneration even if summary exists
       --chunk-size <SIZE>      Chunk size in words [default: 2000]

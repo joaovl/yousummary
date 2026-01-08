@@ -76,8 +76,12 @@ pub struct SummarizeArgs {
     pub print_only: bool,
 
     /// Output directory for saved summaries
-    #[arg(short, long)]
+    #[arg(short = 'd', long)]
     pub output_dir: Option<PathBuf>,
+
+    /// Output file path (overrides output_dir, for single video only)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 
     /// Ollama host URL (for ollama models)
     #[arg(long, default_value = "http://localhost:11434")]
@@ -302,8 +306,14 @@ async fn process_video(
     args: &SummarizeArgs,
     output_dir: &PathBuf,
 ) -> Result<()> {
+    // Determine output file path
+    let output_file = if let Some(ref path) = args.output {
+        path.clone()
+    } else {
+        output_dir.join(format!("{}.md", sanitize_filename(&video.title)))
+    };
+
     // Check if summary already exists
-    let output_file = output_dir.join(format!("{}.md", sanitize_filename(&video.title)));
     if output_file.exists() && !args.force {
         info!("Summary already exists for '{}', skipping (use --force to regenerate)", video.title);
         return Ok(());
@@ -354,8 +364,14 @@ async fn process_video_from_json(
     args: &SummarizeArgs,
     output_dir: &PathBuf,
 ) -> Result<()> {
+    // Determine output file path
+    let output_file = if let Some(ref path) = args.output {
+        path.clone()
+    } else {
+        output_dir.join(format!("{}.md", sanitize_filename(&video.title)))
+    };
+
     // Check if summary already exists
-    let output_file = output_dir.join(format!("{}.md", sanitize_filename(&video.title)));
     if output_file.exists() && !args.force {
         info!("Summary already exists for '{}', skipping (use --force to regenerate)", video.title);
         return Ok(());
