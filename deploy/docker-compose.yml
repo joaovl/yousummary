@@ -1,0 +1,28 @@
+services:
+  yousummary:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: yousummary:latest
+    container_name: yousummary
+    restart: unless-stopped
+    env_file: /root/yousummary.env
+    ports:
+      - "127.0.0.1:8170:8000"
+
+  gate:
+    build: ./gate
+    image: yousummary-gate:latest
+    container_name: yousummary-gate
+    restart: unless-stopped
+    env_file: /root/yousummary.env
+    environment:
+      UPSTREAM: http://127.0.0.1:8170
+      PORT: "8160"
+      HARVESTER_BUGS_URL: http://127.0.0.1:8150/api/bugs
+      YOUSUMMARY_DB_PATH: /data/yousummary.db
+    volumes:
+      - /root/yousummary-data:/data
+    network_mode: host
+    depends_on:
+      - yousummary
