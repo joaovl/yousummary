@@ -7,8 +7,8 @@ services:
     container_name: yousummary
     restart: unless-stopped
     env_file: /root/yousummary.env
-    ports:
-      - "127.0.0.1:8170:8000"
+    expose:
+      - "8000"
 
   gate:
     build: ./gate
@@ -17,12 +17,21 @@ services:
     restart: unless-stopped
     env_file: /root/yousummary.env
     environment:
-      UPSTREAM: http://127.0.0.1:8170
+      UPSTREAM: http://yousummary:8000
       PORT: "8160"
-      HARVESTER_BUGS_URL: http://127.0.0.1:8150/api/bugs
+      HARVESTER_BUGS_URL: http://harvester:3000/api/bugs
       YOUSUMMARY_DB_PATH: /data/yousummary.db
+      GATE_BIND: 0.0.0.0
     volumes:
       - /root/yousummary-data:/data
-    network_mode: host
+    ports:
+      - "127.0.0.1:8160:8160"
     depends_on:
       - yousummary
+    networks:
+      - default
+      - joaovpl
+
+networks:
+  joaovpl:
+    external: true

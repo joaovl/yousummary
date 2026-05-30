@@ -17,4 +17,4 @@ COPY --from=builder /src/target/release/yousummary /usr/local/bin/yousummary
 USER app
 EXPOSE 8000
 ENV RUST_LOG=info
-CMD ["yousummary","serve","--host","127.0.0.1","--port","8000","--default-model","anthropic/claude-haiku-4-5-20251001"]
+CMD ["yousummary","serve","--host","0.0.0.0","--port","8000","--default-model","anthropic/claude-haiku-4-5-20251001"]
