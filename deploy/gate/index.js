@@ -10,16 +10,17 @@ const PORT = Number(process.env.PORT ?? 8160);
 const UPSTREAM = process.env.UPSTREAM ?? "http://127.0.0.1:8170";
 const HARVESTER_BUGS_URL =
   process.env.HARVESTER_BUGS_URL ?? "http://127.0.0.1:8150/api/bugs";
-const TOTP_SECRET = process.env.YOUSUMMARY_TOTP_SECRET;
+const TOTP_SECRET = process.env.MEETINGS_TOTP_SECRET;
 const SESSION_SECRET =
-  process.env.YOUSUMMARY_SESSION_SECRET || "y-session:" + (TOTP_SECRET ?? "");
+  process.env.MEETINGS_SESSION_SECRET || "m-session:" + (TOTP_SECRET ?? "");
+const COOKIE_DOMAIN = process.env.MEETINGS_COOKIE_DOMAIN || undefined;
 const AGENT_TOKEN = process.env.YOUSUMMARY_AGENT_TOKEN;
 const DB_PATH = process.env.YOUSUMMARY_DB_PATH ?? "/data/yousummary.db";
-const COOKIE = "y_session";
+const COOKIE = "m_session";
 const TTL = 12 * 3600;
 
 if (!TOTP_SECRET) {
-  console.error("[gate] YOUSUMMARY_TOTP_SECRET unset — refusing to start");
+  console.error("[gate] MEETINGS_TOTP_SECRET unset — refusing to start");
   process.exit(1);
 }
 if (!AGENT_TOKEN) {
@@ -143,6 +144,7 @@ app.post("/api/unlock", (req, res) => {
     httpOnly: true, sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/", maxAge: TTL * 1000,
+    ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
   });
   res.json({ ok: true });
 });
