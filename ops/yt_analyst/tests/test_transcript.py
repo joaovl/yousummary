@@ -47,3 +47,23 @@ def test_build_yt_dlp_cmd_with_cookies_and_proxy():
     s = " ".join(cmd)
     assert "--cookies /root/cookies.txt" in s
     assert "--proxy http://p:8080" in s
+
+import yt_analyst.transcript as T
+
+def test_fetch_uses_fast_path_when_it_works(monkeypatch):
+    monkeypatch.setattr(T, "_fast_path", lambda vid, lang: "FAST TEXT")
+    monkeypatch.setattr(T, "_yt_dlp_fetch", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not call yt-dlp")))
+    assert T.fetch_transcript("https://youtu.be/VID12345678") == "FAST TEXT"
+
+def test_fetch_falls_back_to_yt_dlp(monkeypatch):
+    def boom(vid, lang): raise RuntimeError("blocked")
+    monkeypatch.setattr(T, "_fast_path", boom)
+    monkeypatch.setattr(T, "_yt_dlp_fetch", lambda vid, cookies, proxy: "YTDLP TEXT")
+    assert T.fetch_transcript("https://youtu.be/VID12345678") == "YTDLP TEXT"
+
+def test_fetch_raises_when_both_fail(monkeypatch):
+    monkeypatch.setattr(T, "_fast_path", lambda v, l: (_ for _ in ()).throw(RuntimeError("a")))
+    monkeypatch.setattr(T, "_yt_dlp_fetch", lambda v, c, p: (_ for _ in ()).throw(RuntimeError("b")))
+    import pytest
+    with pytest.raises(T.TranscriptUnavailable):
+        T.fetch_transcript("VID12345678")

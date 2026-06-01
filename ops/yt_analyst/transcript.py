@@ -65,3 +65,38 @@ def _yt_dlp_fetch(vid: str, cookies: str | None, proxy: str | None) -> str:
                 f"yt-dlp produced no json3 subs (rc={proc.returncode}): "
                 f"{(proc.stderr or proc.stdout).strip()[:300]}")
         return parse_json3(files[0].read_text(encoding="utf-8"))
+
+
+import os
+
+
+class TranscriptUnavailable(Exception):
+    pass
+
+
+def _fast_path(vid: str, lang: str = "en") -> str:
+    """youtube-transcript-api — works without a PoToken when the IP isn't blocked."""
+    from youtube_transcript_api import YouTubeTranscriptApi
+    fetched = YouTubeTranscriptApi().fetch(vid, languages=[lang, "en"])
+    text = " ".join(snippet.text for snippet in fetched if snippet.text.strip())
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        raise RuntimeError("fast-path returned empty transcript")
+    return text
+
+
+def fetch_transcript(url: str, lang: str = "en") -> str:
+    """Return plain-text transcript. Fast-path first, then yt-dlp (+POT/cookies/proxy)."""
+    vid = video_id(url)
+    cookies = os.environ.get("YT_COOKIES_FILE") or None
+    proxy = os.environ.get("YT_PROXY") or None
+    errors = []
+    try:
+        return _fast_path(vid, lang)
+    except Exception as e:  # noqa: BLE001 — escalate to yt-dlp
+        errors.append(f"fast-path: {e}")
+    try:
+        return _yt_dlp_fetch(vid, cookies, proxy)
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"yt-dlp: {e}")
+    raise TranscriptUnavailable(f"{vid}: " + " | ".join(errors))
