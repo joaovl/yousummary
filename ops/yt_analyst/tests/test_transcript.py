@@ -15,3 +15,16 @@ def test_video_id(url, expected):
 def test_video_id_invalid():
     with pytest.raises(ValueError):
         video_id("https://example.com/not-a-video")
+
+from pathlib import Path
+from yt_analyst.transcript import parse_json3
+
+def test_parse_json3():
+    raw = (Path(__file__).parent / "fixtures" / "sample.json3").read_text(encoding="utf-8")
+    text = parse_json3(raw)
+    assert text == "Hello world second line"
+
+def test_parse_json3_empty():
+    import pytest
+    with pytest.raises(ValueError):
+        parse_json3('{"events":[]}')

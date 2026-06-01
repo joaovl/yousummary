@@ -18,3 +18,20 @@ def video_id(url: str) -> str:
     if not m:
         raise ValueError(f"no YouTube video id in: {url}")
     return m.group(1)
+
+
+def parse_json3(raw: str) -> str:
+    """Convert YouTube json3 caption content to clean plain text."""
+    data = json.loads(raw)
+    parts: list[str] = []
+    for ev in data.get("events", []):
+        segs = ev.get("segs")
+        if not segs:
+            continue
+        line = "".join(s.get("utf8", "") for s in segs if s.get("utf8") != "\n")
+        line = line.strip()
+        if line:
+            parts.append(line)
+    if not parts:
+        raise ValueError("no text entries in json3 transcript")
+    return re.sub(r"\s+", " ", " ".join(parts)).strip()
