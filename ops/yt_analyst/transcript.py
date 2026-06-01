@@ -35,3 +35,33 @@ def parse_json3(raw: str) -> str:
     if not parts:
         raise ValueError("no text entries in json3 transcript")
     return re.sub(r"\s+", " ", " ".join(parts)).strip()
+
+
+def build_yt_dlp_cmd(vid: str, out_dir: str, cookies: str | None, proxy: str | None) -> list[str]:
+    """Construct the yt-dlp argv for subtitle-only extraction (json3)."""
+    cmd = [
+        "yt-dlp", "--skip-download",
+        "--write-subs", "--write-auto-subs",
+        "--sub-langs", "en.*", "--sub-format", "json3",
+        "--extractor-args", "youtube:player_client=mweb",
+        "-o", f"{out_dir}/%(id)s.%(ext)s",
+    ]
+    if cookies:
+        cmd += ["--cookies", cookies]
+    if proxy:
+        cmd += ["--proxy", proxy]
+    cmd.append(f"https://www.youtube.com/watch?v={vid}")
+    return cmd
+
+
+def _yt_dlp_fetch(vid: str, cookies: str | None, proxy: str | None) -> str:
+    """Run yt-dlp to download json3 subtitles to a temp dir and return the text."""
+    with tempfile.TemporaryDirectory() as d:
+        cmd = build_yt_dlp_cmd(vid, d, cookies, proxy)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        files = sorted(Path(d).glob(f"{vid}*.json3"))
+        if not files:
+            raise RuntimeError(
+                f"yt-dlp produced no json3 subs (rc={proc.returncode}): "
+                f"{(proc.stderr or proc.stdout).strip()[:300]}")
+        return parse_json3(files[0].read_text(encoding="utf-8"))

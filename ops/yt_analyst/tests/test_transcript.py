@@ -28,3 +28,22 @@ def test_parse_json3_empty():
     import pytest
     with pytest.raises(ValueError):
         parse_json3('{"events":[]}')
+
+from yt_analyst.transcript import build_yt_dlp_cmd
+
+def test_build_yt_dlp_cmd_minimal():
+    cmd = build_yt_dlp_cmd("VID12345678", out_dir="/tmp/x", cookies=None, proxy=None)
+    assert cmd[0] == "yt-dlp"
+    assert "--skip-download" in cmd
+    assert "--write-auto-subs" in cmd and "--write-subs" in cmd
+    assert "json3" in cmd
+    assert "youtube:player_client=mweb" in " ".join(cmd)
+    assert "--cookies" not in cmd and "--proxy" not in cmd
+    assert cmd[-1] == "https://www.youtube.com/watch?v=VID12345678"
+
+def test_build_yt_dlp_cmd_with_cookies_and_proxy():
+    cmd = build_yt_dlp_cmd("VID12345678", out_dir="/tmp/x",
+                           cookies="/root/cookies.txt", proxy="http://p:8080")
+    s = " ".join(cmd)
+    assert "--cookies /root/cookies.txt" in s
+    assert "--proxy http://p:8080" in s
