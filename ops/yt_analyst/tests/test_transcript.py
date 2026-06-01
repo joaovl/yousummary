@@ -67,3 +67,11 @@ def test_fetch_raises_when_both_fail(monkeypatch):
     import pytest
     with pytest.raises(T.TranscriptUnavailable):
         T.fetch_transcript("VID12345678")
+
+import pytest
+
+@pytest.mark.live
+@pytest.mark.parametrize("vid", ["jlK7UWHD3sY", "xtKMO_ZH3Qk", "4WT7FXJah2I"])
+def test_live_fetch(vid):
+    text = T.fetch_transcript(vid)
+    assert len(text) > 200  # a real transcript, not an empty/blocked response
