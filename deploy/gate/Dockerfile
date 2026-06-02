@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r app && useradd -r -g app -d /app app
 COPY --from=builder /app/node_modules ./node_modules
-COPY package.json index.js ./
+COPY package.json index.js analyze_page.js ./
 USER app
 ENV NODE_ENV=production
 EXPOSE 8160
