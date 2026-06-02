@@ -23,7 +23,9 @@ def _token() -> str | None:
 
 TOKEN = _token() or ""
 RULES = {"summary": (PROMPTS / "summary.md").read_text(encoding="utf-8"),
-         "tutorial": (PROMPTS / "tutorial.md").read_text(encoding="utf-8")}
+         "tutorial": (PROMPTS / "tutorial.md").read_text(encoding="utf-8"),
+         "rank": (PROMPTS / "rank.md").read_text(encoding="utf-8"),
+         "compare_extract": (PROMPTS / "compare_extract.md").read_text(encoding="utf-8")}
 
 
 def log(m): print(f"[analyst] {time.strftime('%H:%M:%S', time.gmtime())} {m}", flush=True)
@@ -55,7 +57,17 @@ def process(job: dict) -> tuple[str, str]:
     if not transcript:
         if not urls:
             raise RuntimeError("no transcript and no URL")
-        transcript = fetch_transcript(urls[0])
+        if job.get("mode") == "rank" or len(urls) > 1:
+            blocks = []
+            for n, url in enumerate(urls, 1):
+                try:
+                    text = fetch_transcript(url)
+                except Exception as e:  # noqa: BLE001 — one bad url shouldn't abort the job
+                    text = f"[transcript unavailable: {e}]"
+                blocks.append(f"## Video {n} — {url}\n{text}\n")
+            transcript = "\n".join(blocks)
+        else:
+            transcript = fetch_transcript(urls[0])
     depth = job.get("depth", "medium")
     prompt = build_prompt(job, transcript=transcript[:120000], rules=RULES)
     md = run_claude(prompt, model=model_for(depth), allow_web=(depth != "quick"))

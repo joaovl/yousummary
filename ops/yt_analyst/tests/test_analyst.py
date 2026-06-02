@@ -18,3 +18,22 @@ def test_build_prompt_tutorial_uses_rules_and_depth_intent():
     assert "comprehensive" in p
     assert "set up X" in p
     assert "TRANSCRIPT" in p
+
+_RULES = {"summary": "S", "tutorial": "TUT", "rank": "RANK-RULES", "compare_extract": "CMP-RULES"}
+
+def test_build_prompt_rank_uses_rank_rule():
+    p = build_prompt({"mode": "rank", "depth": "medium", "custom": None}, transcript="T", rules=_RULES)
+    assert "RANK-RULES" in p and "CMP-RULES" not in p and "TUT" not in p
+
+def test_build_prompt_compare_extract_uses_compare_rule():
+    p = build_prompt({"mode": "compare-extract", "depth": "medium", "custom": None}, transcript="T", rules=_RULES)
+    assert "CMP-RULES" in p
+
+def test_build_prompt_auto_and_summary_use_summary_rule():
+    for mode in ("auto", "summary"):
+        p = build_prompt({"mode": mode, "depth": "medium", "custom": None}, transcript="T", rules=_RULES)
+        assert "S" in p and "RANK-RULES" not in p and "CMP-RULES" not in p
+
+def test_build_prompt_custom_overrides_rank():
+    p = build_prompt({"mode": "rank", "depth": "quick", "custom": "ONLY THIS"}, transcript="T", rules=_RULES)
+    assert "ONLY THIS" in p and "RANK-RULES" not in p

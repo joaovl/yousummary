@@ -19,7 +19,8 @@ def build_prompt(job: dict, transcript: str, rules: dict) -> str:
         head = f"Follow these instructions exactly:\n{custom}\n"
     else:
         mode = job.get("mode", "auto")
-        rule = rules.get("tutorial" if mode == "tutorial" else "summary", rules.get("summary", ""))
+        key = {"tutorial": "tutorial", "rank": "rank", "compare-extract": "compare_extract"}.get(mode, "summary")
+        rule = rules.get(key, rules.get("summary", ""))
         head = f"{rule}\nDepth: {depth}.{intent_line}"
     return f"{head}\n\n--- TRANSCRIPT ---\n{transcript}\n--- END TRANSCRIPT ---\n"
 
