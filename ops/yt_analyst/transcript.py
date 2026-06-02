@@ -39,11 +39,13 @@ def parse_json3(raw: str) -> str:
 
 def build_yt_dlp_cmd(vid: str, out_dir: str, cookies: str | None, proxy: str | None) -> list[str]:
     """Construct the yt-dlp argv for subtitle-only extraction (json3)."""
+    # Default client over a residential proxy works without a PO Token; the
+    # mweb client REQUIRES a GVS PO Token (provider can 500) and skips captions,
+    # so we deliberately do NOT pin a player_client here.
     cmd = [
         "yt-dlp", "--skip-download",
         "--write-subs", "--write-auto-subs",
         "--sub-langs", "en.*", "--sub-format", "json3",
-        "--extractor-args", "youtube:player_client=mweb",
         "-o", f"{out_dir}/%(id)s.%(ext)s",
     ]
     if cookies:

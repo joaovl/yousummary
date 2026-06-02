@@ -37,7 +37,9 @@ def test_build_yt_dlp_cmd_minimal():
     assert "--skip-download" in cmd
     assert "--write-auto-subs" in cmd and "--write-subs" in cmd
     assert "json3" in cmd
-    assert "youtube:player_client=mweb" in " ".join(cmd)
+    # No player_client is pinned (default client works over a residential proxy
+    # without a PO Token; mweb would require one).
+    assert "player_client" not in " ".join(cmd)
     assert "--cookies" not in cmd and "--proxy" not in cmd
     assert cmd[-1] == "https://www.youtube.com/watch?v=VID12345678"
 
