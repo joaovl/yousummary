@@ -380,6 +380,39 @@ app.post("/api/agent/jobs/:id/resolve", agentAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// Agent: analysis_jobs list / claim / resolve
+app.get("/api/agent/analysis-jobs", agentAuth, (_req, res) => {
+  const rows = db.prepare(
+    "SELECT id, urls_json, transcript, mode, depth, intent, custom, created_at FROM analysis_jobs WHERE status='pending' ORDER BY id"
+  ).all();
+  res.json({ count: rows.length, jobs: rows.map(r => ({ ...r, urls: JSON.parse(r.urls_json) })) });
+});
+
+app.post("/api/agent/analysis-jobs/:id/claim", agentAuth, (req, res) => {
+  const id = Number(req.params.id);
+  const r = db.prepare(
+    "UPDATE analysis_jobs SET status='processing', claimed_at=datetime('now') WHERE id=? AND status='pending'"
+  ).run(id);
+  if (r.changes === 0) return res.status(409).json({ detail: "not claimable" });
+  res.json({ ok: true });
+});
+
+app.post("/api/agent/analysis-jobs/:id/resolve", agentAuth, (req, res) => {
+  const id = Number(req.params.id);
+  const status = String(req.body?.status ?? "");
+  if (!["done", "failed"].includes(status)) return res.status(400).json({ detail: "status must be done|failed" });
+  const result_md = req.body?.result_md ? String(req.body.result_md) : null;
+  const result_html = req.body?.result_html ? String(req.body.result_html) : null;
+  const error = req.body?.error ? String(req.body.error).slice(0, 4000) : null;
+  if (status === "done" && !result_html) return res.status(400).json({ detail: "result_html required when done" });
+  const r = db.prepare(
+    `UPDATE analysis_jobs SET status=?, result_md=?, result_html=?, error=?, resolved_at=datetime('now')
+       WHERE id=? AND status IN ('processing','pending')`
+  ).run(status, result_md, result_html, error, id);
+  if (r.changes === 0) return res.status(404).json({ detail: "job not found or already resolved" });
+  res.json({ ok: true });
+});
+
 // ---------- Analyze: gated UI + enqueue/poll, token-gated agent endpoints ----------
 const MODES = new Set(["auto", "summary", "tutorial", "compare-extract", "rank"]);
 const DEPTHS = new Set(["quick", "medium", "comprehensive"]);
