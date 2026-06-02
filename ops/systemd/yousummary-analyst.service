@@ -10,6 +10,9 @@ WorkingDirectory=/opt/yousummary/ops
 UnsetEnvironment=ANTHROPIC_API_KEY
 Environment=GATE_BASE=http://127.0.0.1:8160
 Environment=ANALYST_POLL_SECONDS=30
+# Residential egress for YouTube fetches via a home device's reverse SSH tunnel
+# (box localhost:8899 -> home proxy). Only yt-dlp uses it; gate/Claude stay direct.
+Environment=YT_PROXY=http://127.0.0.1:8899
 Environment=PYTHONPATH=/opt/yousummary/ops
 ExecStart=/usr/bin/python3 -m yt_analyst.worker
 Restart=always
