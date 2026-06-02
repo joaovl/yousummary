@@ -1,0 +1,19 @@
+[Unit]
+Description=yousummary analysis worker (agentic Claude, Max sub)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/yousummary/ops
+UnsetEnvironment=ANTHROPIC_API_KEY
+Environment=GATE_BASE=http://127.0.0.1:8160
+Environment=ANALYST_POLL_SECONDS=30
+Environment=PYTHONPATH=/opt/yousummary/ops
+ExecStart=/usr/bin/python3 -m yt_analyst.worker
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
