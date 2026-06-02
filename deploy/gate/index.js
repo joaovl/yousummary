@@ -5,6 +5,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
+import { ANALYZE_HTML } from "./analyze_page.js";
 
 const PORT = Number(process.env.PORT ?? 8160);
 const UPSTREAM = process.env.UPSTREAM ?? "http://127.0.0.1:8170";
@@ -44,6 +45,25 @@ db.exec(`
     resolved_at   TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_compare_jobs_status ON compare_jobs(status);
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS analysis_jobs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    urls_json     TEXT NOT NULL,
+    transcript    TEXT,
+    mode          TEXT NOT NULL DEFAULT 'auto',
+    depth         TEXT NOT NULL DEFAULT 'medium',
+    intent        TEXT,
+    custom        TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    result_md     TEXT,
+    result_html   TEXT,
+    error         TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    claimed_at    TEXT,
+    resolved_at   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_analysis_status ON analysis_jobs(status);
 `);
 
 // ---------- auth helpers ----------
@@ -359,6 +379,44 @@ app.post("/api/agent/jobs/:id/resolve", agentAuth, (req, res) => {
   if (r.changes === 0) return res.status(404).json({ detail: "job not pending or not found" });
   res.json({ ok: true });
 });
+
+// ---------- Analyze: gated UI + enqueue/poll, token-gated agent endpoints ----------
+const MODES = new Set(["auto", "summary", "tutorial", "compare-extract", "rank"]);
+const DEPTHS = new Set(["quick", "medium", "comprehensive"]);
+
+// Submit (gated by Olimpus): URL(s) and/or pasted transcript.
+app.post("/api/analyze", gateMiddleware, (req, res) => {
+  const b = req.body || {};
+  const urls = Array.isArray(b.urls) ? b.urls.map(String).map(s => s.trim()).filter(Boolean) : [];
+  const transcript = b.transcript ? String(b.transcript).slice(0, 200000) : null;
+  if (urls.length === 0 && !transcript) {
+    return res.status(400).json({ detail: "provide at least one URL or a pasted transcript" });
+  }
+  if (urls.length > MAX_COMPARE_URLS) return res.status(400).json({ detail: `max ${MAX_COMPARE_URLS} URLs` });
+  let mode = String(b.mode || "auto"); if (!MODES.has(mode)) mode = "auto";
+  let depth = String(b.depth || "medium"); if (!DEPTHS.has(depth)) depth = "medium";
+  if (urls.length > 1 && mode === "auto") mode = "rank";
+  const intent = b.intent ? String(b.intent).slice(0, 2000) : null;
+  const custom = b.custom ? String(b.custom).slice(0, 4000) : null;
+  const info = db.prepare(
+    "INSERT INTO analysis_jobs (urls_json, transcript, mode, depth, intent, custom) VALUES (?,?,?,?,?,?)"
+  ).run(JSON.stringify(urls), transcript, mode, depth, intent, custom);
+  return res.status(201).json({ id: Number(info.lastInsertRowid), status: "pending" });
+});
+
+// Poll (gated): status + result.
+app.get("/api/analyze/:id", gateMiddleware, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ detail: "bad id" });
+  const row = db.prepare(
+    "SELECT id, urls_json, mode, depth, status, result_html, error, created_at, resolved_at FROM analysis_jobs WHERE id=?"
+  ).get(id);
+  if (!row) return res.status(404).json({ detail: "job not found" });
+  res.json({ ...row, urls: JSON.parse(row.urls_json) });
+});
+
+app.get("/analyze", gateMiddleware, (_req, res) =>
+  res.set("content-type", "text/html; charset=utf-8").send(ANALYZE_HTML));
 
 // ---------- TOTP gate for everything else ----------
 const PUBLIC_PATHS = new Set([
