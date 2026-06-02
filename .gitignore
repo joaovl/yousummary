@@ -20,3 +20,8 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Node / Playwright (gate e2e tests)
+deploy/gate/node_modules/
+deploy/gate/test-results/
+deploy/gate/playwright-report/
