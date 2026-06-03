@@ -26,8 +26,13 @@ def build_prompt(job: dict, transcript: str, rules: dict) -> str:
 
 
 def run_claude(prompt: str, model: str, allow_web: bool, timeout: int = 600) -> str:
-    """Invoke the Max-sub Claude CLI. Read-only web tools when allow_web."""
-    tools = "WebFetch WebSearch" if allow_web else ""
+    """Invoke the Max-sub Claude CLI. Read-only web + Context7 docs when allow_web."""
+    # Context7 (user-scope MCP on the box) gives version-specific official docs;
+    # WebFetch/WebSearch are the general fallback. All read-only.
+    tools = (
+        "WebFetch WebSearch "
+        "mcp__context7__resolve-library-id mcp__context7__query-docs"
+    ) if allow_web else ""
     cmd = ["claude", "-p", "--output-format", "text", "--model", model]
     if tools:
         cmd += ["--allowedTools", tools]
