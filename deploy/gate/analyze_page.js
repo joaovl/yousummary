@@ -14,7 +14,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:.5
 <label>YouTube URL(s)<textarea id=urls placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea></label>
 <div class=row>
 <div><label>Mode<select id=mode>
-<option value=auto>Auto</option><option value=summary>Summary</option><option value=tutorial>Tutorial (verify commands)</option><option value=compare-extract>Comparison-extract</option><option value=rank>Rank multiple</option></select></div>
+<option value=auto>Auto</option><option value=summary>Summary</option><option value=tutorial>Tutorial (verify commands)</option><option value=compare-extract>Comparison-extract</option><option value=rank>Rank multiple</option><option value=research>Research / fact-check</option><option value=product-score>Product scoring</option></select></div>
 <div><label>Depth<select id=depth><option value=quick>Quick</option><option value=medium selected>Medium</option><option value=comprehensive>Comprehensive</option></select></div>
 </div>
 <label>What are you looking for? (optional)<input id=intent placeholder="e.g. set up X on Windows"></label>

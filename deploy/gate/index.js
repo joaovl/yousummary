@@ -414,7 +414,7 @@ app.post("/api/agent/analysis-jobs/:id/resolve", agentAuth, (req, res) => {
 });
 
 // ---------- Analyze: gated UI + enqueue/poll, token-gated agent endpoints ----------
-const MODES = new Set(["auto", "summary", "tutorial", "compare-extract", "rank"]);
+const MODES = new Set(["auto", "summary", "tutorial", "compare-extract", "rank", "research", "product-score"]);
 const DEPTHS = new Set(["quick", "medium", "comprehensive"]);
 
 // Submit (gated by Olimpus): URL(s) and/or pasted transcript.
