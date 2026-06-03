@@ -25,7 +25,9 @@ TOKEN = _token() or ""
 RULES = {"summary": (PROMPTS / "summary.md").read_text(encoding="utf-8"),
          "tutorial": (PROMPTS / "tutorial.md").read_text(encoding="utf-8"),
          "rank": (PROMPTS / "rank.md").read_text(encoding="utf-8"),
-         "compare_extract": (PROMPTS / "compare_extract.md").read_text(encoding="utf-8")}
+         "compare_extract": (PROMPTS / "compare_extract.md").read_text(encoding="utf-8"),
+         "research": (PROMPTS / "research.md").read_text(encoding="utf-8"),
+         "product_score": (PROMPTS / "product_score.md").read_text(encoding="utf-8")}
 
 
 def log(m): print(f"[analyst] {time.strftime('%H:%M:%S', time.gmtime())} {m}", flush=True)

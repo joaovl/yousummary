@@ -19,7 +19,8 @@ def test_build_prompt_tutorial_uses_rules_and_depth_intent():
     assert "set up X" in p
     assert "TRANSCRIPT" in p
 
-_RULES = {"summary": "S", "tutorial": "TUT", "rank": "RANK-RULES", "compare_extract": "CMP-RULES"}
+_RULES = {"summary": "S", "tutorial": "TUT", "rank": "RANK-RULES", "compare_extract": "CMP-RULES",
+          "research": "RESEARCH-RULES", "product_score": "PRODUCT-RULES"}
 
 def test_build_prompt_rank_uses_rank_rule():
     p = build_prompt({"mode": "rank", "depth": "medium", "custom": None}, transcript="T", rules=_RULES)
@@ -37,3 +38,16 @@ def test_build_prompt_auto_and_summary_use_summary_rule():
 def test_build_prompt_custom_overrides_rank():
     p = build_prompt({"mode": "rank", "depth": "quick", "custom": "ONLY THIS"}, transcript="T", rules=_RULES)
     assert "ONLY THIS" in p and "RANK-RULES" not in p
+
+def test_build_prompt_research_uses_research_rule():
+    p = build_prompt({"mode": "research", "depth": "medium", "custom": None}, transcript="T", rules=_RULES)
+    assert "RESEARCH-RULES" in p and "PRODUCT-RULES" not in p and "RANK-RULES" not in p
+
+def test_build_prompt_product_score_uses_product_rule():
+    p = build_prompt({"mode": "product-score", "depth": "medium", "custom": None}, transcript="T", rules=_RULES)
+    assert "PRODUCT-RULES" in p and "RESEARCH-RULES" not in p and "S" in p
+
+def test_build_prompt_custom_overrides_research_and_product():
+    for mode in ("research", "product-score"):
+        p = build_prompt({"mode": mode, "depth": "quick", "custom": "ONLY THIS"}, transcript="T", rules=_RULES)
+        assert "ONLY THIS" in p and "RESEARCH-RULES" not in p and "PRODUCT-RULES" not in p
