@@ -14,10 +14,20 @@ and **Depth**, optionally say what you're looking for, and get:
 - **Comparison-extract** — pulls what a single comparison video compares into a table.
 - **Rank** (auto when ≥2 URLs) — a ranked table (top vs weak) with concrete,
   doc-verified red flags.
+- **Research / fact-check** — extracts the video's claims and classifies each
+  Supported / Partial / Contradicted / Unverified against docs/research, with a
+  source + confidence; outputs a claims table + synthesis + references.
+- **Product scoring** — identifies the products a review covers, verifies key
+  specs against the manufacturer's site, scores each on a rubric (re-weighted by
+  your intent), and outputs a ranked product table + top pick.
 
-Controls: **Mode** (Auto/Summary/Tutorial/Comparison-extract/Rank), **Depth**
-(Quick→sonnet,no web · Medium/Comprehensive→opus,web verification), an **intent**
-box, and a **Custom instructions** box that overrides Mode/Depth for one-off asks.
+Controls: **Mode** (Auto/Summary/Tutorial/Comparison-extract/Rank/Research/Product-score),
+**Depth** (Quick→sonnet,no web · Medium/Comprehensive→opus,web verification), an
+**intent** box, and a **Custom instructions** box that overrides Mode/Depth for one-off asks.
+
+Doc matching uses **Context7 MCP** (user-scope on the box, tools
+`mcp__context7__resolve-library-id` + `query-docs`) for version-specific official
+docs, falling back to WebFetch/WebSearch.
 
 ## Architecture
 - **Gate** (`deploy/gate/`, Node): `/analyze` page + `analysis_jobs` queue +
