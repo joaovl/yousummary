@@ -29,3 +29,7 @@ deploy/gate/playwright-report/
 # Playwright artifacts
 test-results/
 deploy/gate/test-results/
+
+# Local probe output
+and.json
+c-*.json
