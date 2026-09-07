@@ -3,7 +3,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,29 +169,71 @@ fn is_valid_video_id(id: &str) -> bool {
 
 /// Fetch video information from YouTube
 pub async fn fetch_video_info(video_id: &str) -> Result<VideoInfo, YouSummaryError> {
-    let client = Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .build()?;
-
-    // Fetch the watch page to extract title and channel
     let url = format!("https://www.youtube.com/watch?v={}", video_id);
-    let response = client.get(&url).send().await?;
+    let mut args: Vec<String> = vec![
+        "--skip-download".into(),
+        "--no-warnings".into(),
+        "--no-playlist".into(),
+        "--dump-single-json".into(),
+    ];
+    args.extend(crate::transcript::ytdlp_env_args());
+    args.push(url);
 
-    if !response.status().is_success() {
+    let output = tokio::process::Command::new("yt-dlp")
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| YouSummaryError::TranscriptFetchError(format!("Failed to run yt-dlp: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr
+            .lines()
+            .filter(|l| l.starts_with("ERROR:"))
+            .last()
+            .unwrap_or_else(|| stderr.trim())
+            .to_string();
+        warn!("yt-dlp metadata lookup failed for {}: {}", video_id, detail);
         return Err(YouSummaryError::VideoNotFound(video_id.to_string()));
     }
 
-    let html = response.text().await?;
+    parse_video_info_json(&String::from_utf8_lossy(&output.stdout), video_id)
+}
 
-    // Extract title from the page
-    let title = extract_title_from_html(&html).unwrap_or_else(|| format!("Video {}", video_id));
-    let channel = extract_channel_from_html(&html);
+/// Read the fields we care about out of `yt-dlp --dump-single-json`.
+fn parse_video_info_json(json: &str, video_id: &str) -> Result<VideoInfo, YouSummaryError> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| YouSummaryError::ParseError(format!("Failed to parse yt-dlp JSON: {}", e)))?;
+
+    let title = value
+        .get("title")
+        .and_then(|t| t.as_str())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| format!("Video {}", video_id));
+
+    let channel = value
+        .get("channel")
+        .or_else(|| value.get("uploader"))
+        .and_then(|c| c.as_str())
+        .filter(|c| !c.is_empty())
+        .map(|c| c.to_string());
+
+    let duration = value.get("duration").and_then(|d| d.as_f64()).map(|secs| {
+        let secs = secs.round() as u64;
+        let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+        if h > 0 {
+            format!("{}:{:02}:{:02}", h, m, s)
+        } else {
+            format!("{}:{:02}", m, s)
+        }
+    });
 
     Ok(VideoInfo {
         video_id: video_id.to_string(),
         title,
         channel,
-        duration: None,
+        duration,
     })
 }
 
@@ -299,40 +341,7 @@ pub async fn fetch_video_metadata(video_id: &str) -> Result<VideoMetadata, YouSu
     })
 }
 
-fn extract_title_from_html(html: &str) -> Option<String> {
-    // Try to extract from og:title meta tag
-    let og_title_re = Regex::new(r#"<meta\s+property="og:title"\s+content="([^"]+)""#).ok()?;
-    if let Some(caps) = og_title_re.captures(html) {
-        return Some(html_escape::decode_html_entities(&caps[1]).to_string());
-    }
 
-    // Try to extract from <title> tag
-    let title_re = Regex::new(r#"<title>([^<]+)</title>"#).ok()?;
-    if let Some(caps) = title_re.captures(html) {
-        let title = caps[1].to_string();
-        // Remove " - YouTube" suffix
-        let title = title.trim_end_matches(" - YouTube").to_string();
-        return Some(html_escape::decode_html_entities(&title).to_string());
-    }
-
-    None
-}
-
-fn extract_channel_from_html(html: &str) -> Option<String> {
-    // Try to extract from link tag with channel info
-    let channel_re = Regex::new(r#""ownerChannelName"\s*:\s*"([^"]+)""#).ok()?;
-    if let Some(caps) = channel_re.captures(html) {
-        return Some(html_escape::decode_html_entities(&caps[1]).to_string());
-    }
-
-    // Fallback: try og:site_name or author
-    let author_re = Regex::new(r#"<link\s+itemprop="name"\s+content="([^"]+)""#).ok()?;
-    if let Some(caps) = author_re.captures(html) {
-        return Some(html_escape::decode_html_entities(&caps[1]).to_string());
-    }
-
-    None
-}
 
 /// Fetch videos from a playlist
 async fn fetch_playlist_videos(playlist_id: &str) -> Result<Vec<VideoInfo>, YouSummaryError> {
@@ -390,6 +399,23 @@ async fn fetch_playlist_videos(playlist_id: &str) -> Result<Vec<VideoInfo>, YouS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_info_is_read_from_ytdlp_json() {
+        let json = r#"{"id":"abc123","title":"Some Title","channel":"Some Channel","duration":754}"#;
+        let info = parse_video_info_json(json, "abc123").unwrap();
+        assert_eq!(info.title, "Some Title");
+        assert_eq!(info.channel.as_deref(), Some("Some Channel"));
+        assert_eq!(info.duration.as_deref(), Some("12:34"));
+    }
+
+    #[test]
+    fn video_info_falls_back_when_fields_are_missing() {
+        let info = parse_video_info_json(r#"{"id":"abc123"}"#, "abc123").unwrap();
+        assert_eq!(info.title, "Video abc123");
+        assert_eq!(info.channel, None);
+        assert_eq!(info.duration, None);
+    }
 
     #[test]
     fn test_extract_video_id() {

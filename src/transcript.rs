@@ -196,6 +196,25 @@ fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
 }
 
+/// yt-dlp flags derived from the environment: egress proxy, PO-token provider
+/// and JS runtime. Shared by every yt-dlp invocation in the codebase.
+pub fn ytdlp_env_args() -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(proxy) = non_empty(std::env::var("YT_PROXY").ok()) {
+        args.push("--proxy".into());
+        args.push(proxy);
+    }
+    if let Some(base) = non_empty(std::env::var("YT_POT_BASE_URL").ok()) {
+        args.push("--extractor-args".into());
+        args.push(format!("youtube:getpot_bgutil_baseurl={}", base));
+    }
+    if let Some(runtime) = non_empty(std::env::var("YT_JS_RUNTIME").ok()) {
+        args.push("--js-runtimes".into());
+        args.push(runtime);
+    }
+    args
+}
+
 /// Build the yt-dlp argument list for a subtitle-only download.
 fn ytdlp_args(
     video_id: &str,
