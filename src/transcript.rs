@@ -1,6 +1,5 @@
 use crate::error::YouSummaryError;
 use regex::Regex;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
@@ -13,18 +12,11 @@ pub struct TranscriptEntry {
 }
 
 /// Fetcher for YouTube transcripts
-pub struct TranscriptFetcher {
-    client: Client,
-}
+pub struct TranscriptFetcher {}
 
 impl TranscriptFetcher {
     pub fn new() -> Self {
-        let client = Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self { client }
+        Self {}
     }
 
     /// Fetch transcript for a video, optionally in a specific language
@@ -33,31 +25,13 @@ impl TranscriptFetcher {
         video_id: &str,
         language: Option<&str>,
     ) -> Result<String, YouSummaryError> {
-        info!("Fetching transcript for video: {}", video_id);
+        let entries = self.fetch_with_timestamps(video_id, language).await?;
 
-        // First, get the video page to extract caption tracks
-        let caption_tracks = self.get_caption_tracks(video_id).await?;
-
-        if caption_tracks.is_empty() {
-            return Err(YouSummaryError::TranscriptNotFound(video_id.to_string()));
-        }
-
-        debug!("Found {} caption tracks", caption_tracks.len());
-
-        // Find the best matching track
-        let track = self.select_best_track(&caption_tracks, language)?;
-
-        // Fetch the actual transcript
-        let entries = self.fetch_transcript_from_url(&track.base_url).await?;
-
-        // Convert entries to plain text
         let text = entries
             .iter()
             .map(|e| e.text.clone())
             .collect::<Vec<_>>()
             .join(" ");
-
-        // Clean up the text
         let text = clean_transcript_text(&text);
 
         info!(
@@ -67,288 +41,84 @@ impl TranscriptFetcher {
         Ok(text)
     }
 
-    /// Fetch transcript with timing information
-    #[allow(dead_code)]
+    /// Fetch transcript with timing information.
+    ///
+    /// YouTube's player API no longer serves caption tracks to anonymous HTTP
+    /// clients (every innertube client answers UNPLAYABLE or LOGIN_REQUIRED),
+    /// so subtitles come from yt-dlp, which handles PO tokens, clients and
+    /// cookies for us. `YT_PROXY` and `YT_POT_BASE_URL` are passed through when
+    /// set, matching what ops/yt_analyst already expects.
     pub async fn fetch_with_timestamps(
         &self,
         video_id: &str,
         language: Option<&str>,
     ) -> Result<Vec<TranscriptEntry>, YouSummaryError> {
-        let caption_tracks = self.get_caption_tracks(video_id).await?;
+        info!("Fetching transcript for video: {}", video_id);
 
-        if caption_tracks.is_empty() {
-            return Err(YouSummaryError::TranscriptNotFound(video_id.to_string()));
-        }
+        let language = language.unwrap_or("en");
+        let dir = tempfile::Builder::new()
+            .prefix("yousummary-subs-")
+            .tempdir()
+            .map_err(|e| {
+                YouSummaryError::TranscriptFetchError(format!("Failed to create temp dir: {}", e))
+            })?;
+        let template = dir.path().join("sub");
 
-        let track = self.select_best_track(&caption_tracks, language)?;
-        self.fetch_transcript_from_url(&track.base_url).await
-    }
+        let proxy = non_empty(std::env::var("YT_PROXY").ok());
+        let pot = non_empty(std::env::var("YT_POT_BASE_URL").ok());
+        let js_runtime = non_empty(std::env::var("YT_JS_RUNTIME").ok());
+        let args = ytdlp_args(
+            video_id,
+            language,
+            &template,
+            proxy.as_deref(),
+            pot.as_deref(),
+            js_runtime.as_deref(),
+        );
 
-    /// Get available caption tracks for a video using YouTube's innertube API
-    async fn get_caption_tracks(&self, video_id: &str) -> Result<Vec<CaptionTrack>, YouSummaryError> {
-        // Try innertube player API first (more reliable)
-        if let Ok(tracks) = self.get_caption_tracks_innertube(video_id).await {
-            if !tracks.is_empty() {
-                return Ok(tracks);
-            }
-        }
+        debug!("Running yt-dlp {}", args.join(" "));
 
-        // Fall back to HTML parsing
-        debug!("Innertube API failed, falling back to HTML parsing");
-        let url = format!("https://www.youtube.com/watch?v={}", video_id);
-        let response = self.client.get(&url).send().await?;
+        let output = tokio::process::Command::new("yt-dlp")
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| {
+                YouSummaryError::TranscriptFetchError(format!("Failed to run yt-dlp: {}", e))
+            })?;
 
-        if !response.status().is_success() {
-            return Err(YouSummaryError::VideoNotFound(video_id.to_string()));
-        }
-
-        let html = response.text().await?;
-        self.extract_caption_tracks(&html)
-    }
-
-    /// Get caption tracks using YouTube's innertube player API (like yt-dlp does)
-    async fn get_caption_tracks_innertube(&self, video_id: &str) -> Result<Vec<CaptionTrack>, YouSummaryError> {
-        let api_url = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
-
-        // Use Android client context (works without authentication)
-        let payload = serde_json::json!({
-            "context": {
-                "client": {
-                    "clientName": "ANDROID",
-                    "clientVersion": "19.09.37",
-                    "androidSdkVersion": 30,
-                    "hl": "en",
-                    "gl": "US",
-                    "utcOffsetMinutes": 0
-                }
-            },
-            "videoId": video_id,
-            "playbackContext": {
-                "contentPlaybackContext": {
-                    "html5Preference": "HTML5_PREF_WANTS"
-                }
-            },
-            "contentCheckOk": true,
-            "racyCheckOk": true
-        });
-
-        debug!("Fetching captions via innertube API for video: {}", video_id);
-
-        let response = self
-            .client
-            .post(api_url)
-            .header("Content-Type", "application/json")
-            .header("X-YouTube-Client-Name", "3")
-            .header("X-YouTube-Client-Version", "19.09.37")
-            .body(payload.to_string())
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let detail = stderr
+                .lines()
+                .filter(|l| l.starts_with("ERROR:"))
+                .last()
+                .unwrap_or_else(|| stderr.trim())
+                .to_string();
             return Err(YouSummaryError::TranscriptFetchError(format!(
-                "Innertube API returned HTTP {}",
-                response.status()
+                "yt-dlp failed for {}: {}",
+                video_id,
+                if detail.is_empty() { "no output".to_string() } else { detail }
             )));
         }
 
-        let json: serde_json::Value = response.json().await
-            .map_err(|e| YouSummaryError::ParseError(format!("Failed to parse innertube response: {}", e)))?;
+        let subtitle = find_subtitle_file(dir.path()).ok_or_else(|| {
+            warn!("yt-dlp produced no subtitle file for {}", video_id);
+            YouSummaryError::TranscriptNotFound(video_id.to_string())
+        })?;
 
-        // Extract caption tracks from the response
-        let mut tracks = Vec::new();
+        let json = std::fs::read_to_string(&subtitle).map_err(|e| {
+            YouSummaryError::TranscriptFetchError(format!("Failed to read subtitles: {}", e))
+        })?;
 
-        if let Some(captions) = json.get("captions") {
-            if let Some(renderer) = captions.get("playerCaptionsTracklistRenderer") {
-                if let Some(caption_tracks) = renderer.get("captionTracks").and_then(|t| t.as_array()) {
-                    for track in caption_tracks {
-                        if let Some(base_url) = track.get("baseUrl").and_then(|u| u.as_str()) {
-                            let language_code = track
-                                .get("languageCode")
-                                .and_then(|l| l.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-
-                            let name = track
-                                .get("name")
-                                .and_then(|n| n.get("simpleText"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or(&language_code)
-                                .to_string();
-
-                            let is_auto_generated = track
-                                .get("kind")
-                                .and_then(|k| k.as_str())
-                                .map(|k| k == "asr")
-                                .unwrap_or(false);
-
-                            tracks.push(CaptionTrack {
-                                base_url: base_url.to_string(),
-                                language_code,
-                                name,
-                                is_auto_generated,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        if tracks.is_empty() {
-            // Check if there are automatic captions available via translation
-            debug!("No direct caption tracks, checking for translatable auto-captions");
-        }
-
-        debug!("Found {} caption tracks via innertube API", tracks.len());
-        Ok(tracks)
-    }
-
-    /// Extract caption track info from the YouTube page HTML
-    fn extract_caption_tracks(&self, html: &str) -> Result<Vec<CaptionTrack>, YouSummaryError> {
-        // Look for the captions data in the player response
-        let _captions_re = Regex::new(r#""captions"\s*:\s*\{[^}]*"playerCaptionsTracklistRenderer"\s*:\s*\{[^}]*"captionTracks"\s*:\s*\[([^\]]+)\]"#)
-            .map_err(|e| YouSummaryError::ParseError(e.to_string()))?;
-
-        // Alternative pattern for ytInitialPlayerResponse
-        let player_response_re = Regex::new(r#"ytInitialPlayerResponse\s*=\s*(\{.+?\});"#)
-            .map_err(|e| YouSummaryError::ParseError(e.to_string()))?;
-
-        let mut tracks = Vec::new();
-
-        // Try to find caption tracks in ytInitialPlayerResponse
-        if let Some(caps) = player_response_re.captures(html) {
-            let json_str = &caps[1];
-            
-            // Extract baseUrl and languageCode from the JSON
-            let base_url_re = Regex::new(r#""baseUrl"\s*:\s*"([^"]+)""#).unwrap();
-            let lang_re = Regex::new(r#""languageCode"\s*:\s*"([^"]+)""#).unwrap();
-            let name_re = Regex::new(r#""name"\s*:\s*\{[^}]*"simpleText"\s*:\s*"([^"]+)""#).unwrap();
-            let kind_re = Regex::new(r#""kind"\s*:\s*"([^"]+)""#).unwrap();
-
-            // Find all caption track sections
-            let track_section_re = Regex::new(r#"\{"baseUrl"[^}]+\}"#).unwrap();
-
-            for track_match in track_section_re.find_iter(json_str) {
-                let track_json = track_match.as_str();
-
-                if let Some(url_caps) = base_url_re.captures(track_json) {
-                    let base_url = url_caps[1].to_string().replace("\\u0026", "&");
-
-                    let language_code = lang_re
-                        .captures(track_json)
-                        .map(|c| c[1].to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
-
-                    let name = name_re
-                        .captures(track_json)
-                        .map(|c| c[1].to_string())
-                        .unwrap_or_else(|| language_code.clone());
-
-                    let is_auto_generated = kind_re
-                        .captures(track_json)
-                        .map(|c| c[1].contains("asr"))
-                        .unwrap_or(false);
-
-                    tracks.push(CaptionTrack {
-                        base_url,
-                        language_code,
-                        name,
-                        is_auto_generated,
-                    });
-                }
-            }
-        }
-
-        // Deduplicate tracks by language code
-        tracks.sort_by(|a, b| {
-            // Prefer non-auto-generated tracks
-            match (a.is_auto_generated, b.is_auto_generated) {
-                (false, true) => std::cmp::Ordering::Less,
-                (true, false) => std::cmp::Ordering::Greater,
-                _ => a.language_code.cmp(&b.language_code),
-            }
-        });
-        tracks.dedup_by(|a, b| a.language_code == b.language_code);
-
-        Ok(tracks)
-    }
-
-    /// Select the best caption track based on language preference
-    fn select_best_track<'a>(
-        &'a self,
-        tracks: &'a [CaptionTrack],
-        preferred_language: Option<&str>,
-    ) -> Result<&'a CaptionTrack, YouSummaryError> {
-        if tracks.is_empty() {
-            return Err(YouSummaryError::TranscriptNotFound(
-                "No caption tracks available".to_string(),
+        let entries = self.parse_transcript_json3(&json)?;
+        if entries.is_empty() {
+            return Err(YouSummaryError::TranscriptFetchError(
+                "No text entries found in transcript".to_string(),
             ));
         }
-
-        // If a language is preferred, try to find it
-        if let Some(lang) = preferred_language {
-            // First try exact match
-            if let Some(track) = tracks.iter().find(|t| t.language_code == lang) {
-                return Ok(track);
-            }
-
-            // Try prefix match (e.g., "en" matches "en-US")
-            if let Some(track) = tracks.iter().find(|t| t.language_code.starts_with(lang)) {
-                return Ok(track);
-            }
-
-            warn!(
-                "Preferred language '{}' not found, using first available",
-                lang
-            );
-        }
-
-        // Return the first non-auto-generated track if available
-        if let Some(track) = tracks.iter().find(|t| !t.is_auto_generated) {
-            return Ok(track);
-        }
-
-        // Fall back to any available track
-        Ok(&tracks[0])
+        Ok(entries)
     }
 
-    /// Fetch transcript from a caption track URL
-    async fn fetch_transcript_from_url(
-        &self,
-        url: &str,
-    ) -> Result<Vec<TranscriptEntry>, YouSummaryError> {
-        // Ensure we use json3 format (replace any existing fmt parameter)
-        let json_url = if url.contains("&fmt=") {
-            // Replace existing format with json3
-            Regex::new(r"&fmt=[^&]+")
-                .unwrap()
-                .replace(url, "&fmt=json3")
-                .to_string()
-        } else {
-            format!("{}&fmt=json3", url)
-        };
-
-        debug!("Fetching transcript from: {}", &json_url[..json_url.len().min(100)]);
-
-        let response = self.client.get(&json_url).send().await?;
-
-        if !response.status().is_success() {
-            return Err(YouSummaryError::TranscriptFetchError(format!(
-                "Failed to fetch transcript: HTTP {}",
-                response.status()
-            )));
-        }
-
-        let content = response.text().await?;
-
-        // Try JSON format first (json3), fall back to XML
-        if content.trim().starts_with('{') {
-            self.parse_transcript_json3(&content)
-        } else {
-            self.parse_transcript_xml(&content)
-        }
-    }
-
-    /// Parse the transcript JSON3 format (YouTube's newer format)
     fn parse_transcript_json3(&self, json: &str) -> Result<Vec<TranscriptEntry>, YouSummaryError> {
         let mut entries = Vec::new();
 
@@ -399,50 +169,12 @@ impl TranscriptFetcher {
         Ok(entries)
     }
 
-    /// Parse the transcript XML format (legacy fallback)
-    fn parse_transcript_xml(&self, xml: &str) -> Result<Vec<TranscriptEntry>, YouSummaryError> {
-        let mut entries = Vec::new();
-
-        // Parse <text start="X" dur="Y">content</text> elements
-        let text_re = Regex::new(r#"<text\s+start="([^"]+)"\s+dur="([^"]+)"[^>]*>([^<]*)</text>"#)
-            .map_err(|e| YouSummaryError::ParseError(e.to_string()))?;
-
-        for caps in text_re.captures_iter(xml) {
-            let start: f64 = caps[1].parse().unwrap_or(0.0);
-            let duration: f64 = caps[2].parse().unwrap_or(0.0);
-            let text = html_escape::decode_html_entities(&caps[3]).to_string();
-
-            entries.push(TranscriptEntry {
-                text,
-                start,
-                duration,
-            });
-        }
-
-        if entries.is_empty() {
-            return Err(YouSummaryError::TranscriptFetchError(
-                "No text entries found in transcript".to_string(),
-            ));
-        }
-
-        Ok(entries)
-    }
 }
 
 impl Default for TranscriptFetcher {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Represents a YouTube caption track
-#[derive(Debug, Clone)]
-struct CaptionTrack {
-    base_url: String,
-    language_code: String,
-    #[allow(dead_code)]
-    name: String,
-    is_auto_generated: bool,
 }
 
 /// Clean up transcript text
@@ -458,9 +190,111 @@ fn clean_transcript_text(text: &str) -> String {
     text.trim().to_string()
 }
 
+/// Compose files often set a variable to "" rather than omitting it; an empty
+/// value means "not configured", not "pass an empty flag".
+fn non_empty(value: Option<String>) -> Option<String> {
+    value.filter(|v| !v.trim().is_empty())
+}
+
+/// Build the yt-dlp argument list for a subtitle-only download.
+fn ytdlp_args(
+    video_id: &str,
+    language: &str,
+    output_template: &std::path::Path,
+    proxy: Option<&str>,
+    pot_base_url: Option<&str>,
+    js_runtime: Option<&str>,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "--skip-download".into(),
+        "--no-warnings".into(),
+        "--no-playlist".into(),
+        "--write-subs".into(),
+        "--write-auto-subs".into(),
+        "--sub-langs".into(),
+        format!("{}.*,{}", language, language),
+        "--sub-format".into(),
+        "json3".into(),
+        "-o".into(),
+        output_template.to_string_lossy().to_string(),
+    ];
+
+    if let Some(proxy) = proxy {
+        args.push("--proxy".into());
+        args.push(proxy.to_string());
+    }
+    if let Some(base) = pot_base_url {
+        args.push("--extractor-args".into());
+        args.push(format!("youtube:getpot_bgutil_baseurl={}", base));
+    }
+    if let Some(runtime) = js_runtime {
+        args.push("--js-runtimes".into());
+        args.push(runtime.to_string());
+    }
+
+    args.push(format!("https://www.youtube.com/watch?v={}", video_id));
+    args
+}
+
+/// yt-dlp names the file `<template>.<lang>.json3`; take whichever it wrote.
+fn find_subtitle_file(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("json3"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ytdlp_args_request_json3_subtitles_for_the_language() {
+        let args = ytdlp_args("abc123", "en", std::path::Path::new("/tmp/out"), None, None, None);
+        assert!(args.contains(&"--write-auto-subs".to_string()));
+        assert!(args.contains(&"--sub-format".to_string()));
+        assert!(args.contains(&"json3".to_string()));
+        assert!(args.contains(&"en.*,en".to_string()));
+        assert!(args.contains(&"https://www.youtube.com/watch?v=abc123".to_string()));
+        assert!(!args.contains(&"--proxy".to_string()));
+    }
+
+    #[test]
+    fn blank_env_values_are_treated_as_unset() {
+        assert_eq!(non_empty(Some("  ".to_string())), None);
+        assert_eq!(non_empty(Some(String::new())), None);
+        assert_eq!(non_empty(Some("http://p:1".to_string())), Some("http://p:1".to_string()));
+        assert_eq!(non_empty(None), None);
+    }
+
+    #[test]
+    fn ytdlp_args_select_the_js_runtime_when_configured() {
+        let args = ytdlp_args(
+            "abc123",
+            "en",
+            std::path::Path::new("/tmp/out"),
+            None,
+            None,
+            Some("node"),
+        );
+        assert!(args.join(" ").contains("--js-runtimes node"));
+    }
+
+    #[test]
+    fn ytdlp_args_include_proxy_and_pot_provider_when_configured() {
+        let args = ytdlp_args(
+            "abc123",
+            "en",
+            std::path::Path::new("/tmp/out"),
+            Some("http://127.0.0.1:8899"),
+            Some("http://bgutil-pot:4416"),
+            None,
+        );
+        let joined = args.join(" ");
+        assert!(joined.contains("--proxy http://127.0.0.1:8899"));
+        assert!(joined.contains("getpot_bgutil_baseurl=http://bgutil-pot:4416"));
+    }
 
     #[test]
     fn test_clean_transcript_text() {
