@@ -325,7 +325,8 @@ impl LlmClient {
 
         result
             .content
-            .first()
+            .iter()
+            .find(|c| c.block_type == "text")
             .map(|c| c.text.clone())
             .ok_or_else(|| YouSummaryError::LlmError("No response from Anthropic".to_string()))
     }
@@ -396,6 +397,9 @@ struct AnthropicResponse {
 
 #[derive(Debug, Deserialize)]
 struct AnthropicContentBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    #[serde(default)]
     text: String,
 }
 

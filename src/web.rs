@@ -559,7 +559,7 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
                 <div class="options-row">
                     <div class="form-group">
                         <label for="model">Model</label>
-                        <input type="text" id="model" name="model" placeholder="ollama/llama3.2:3b">
+                        <input type="text" id="model" name="model" placeholder="anthropic/claude-sonnet-5">
                     </div>
 
                     <div class="form-group">
