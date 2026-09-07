@@ -12,10 +12,10 @@ services:
       # would shadow them.
       ANTHROPIC_API_KEY: ""
       HOME: /root
-      # yt-dlp fetches subtitles. YT_PROXY must be reachable *from this
-      # container* (a host-loopback tunnel needs to bind 0.0.0.0 or the docker
-      # gateway); leave it empty to fetch straight from the box's IP.
-      YT_PROXY: "${YT_PROXY:-}"
+      # yt-dlp fetches subtitles. Set YT_PROXY in /root/yousummary.env to route
+      # them through an egress proxy; it must be reachable *from this
+      # container*, so a host-loopback tunnel needs a bridge on the docker
+      # gateway (see ops/systemd/yousummary-ytproxy-bridge.service).
       YT_POT_BASE_URL: "http://bgutil-pot:4416"
       YT_JS_RUNTIME: "node"
     volumes:

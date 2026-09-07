@@ -1,0 +1,18 @@
+# The home egress proxy arrives as a reverse SSH tunnel bound to 127.0.0.1:8899
+# on the box, which containers cannot reach. sshd here has GatewayPorts off, so
+# rather than change sshd, republish the port on the docker bridge gateway.
+#
+#   install: apt-get install -y socat
+#            systemctl enable --now yousummary-ytproxy-bridge.service
+#   then set YT_PROXY=http://172.22.0.1:8899 in /root/yousummary.env
+[Unit]
+Description=Expose the home YouTube egress proxy to docker containers
+After=network-online.target docker.service
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:8899,bind=172.22.0.1,fork,reuseaddr TCP:127.0.0.1:8899
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
