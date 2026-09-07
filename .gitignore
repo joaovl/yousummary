@@ -25,3 +25,7 @@ Thumbs.db
 deploy/gate/node_modules/
 deploy/gate/test-results/
 deploy/gate/playwright-report/
+
+# Playwright artifacts
+test-results/
+deploy/gate/test-results/
