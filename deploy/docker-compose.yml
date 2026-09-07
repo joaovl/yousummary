@@ -7,6 +7,13 @@ services:
     container_name: yousummary
     restart: unless-stopped
     env_file: /root/yousummary.env
+    environment:
+      # claude CLI uses the box's subscription credentials; an API key here
+      # would shadow them.
+      ANTHROPIC_API_KEY: ""
+      HOME: /root
+    volumes:
+      - /root/.claude:/root/.claude
     expose:
       - "8000"
 

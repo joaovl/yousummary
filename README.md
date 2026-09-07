@@ -237,7 +237,7 @@ yousummary summarize <TARGET> <MODEL> [OPTIONS]
 
 Arguments:
   <TARGET>  YouTube URL, playlist URL, JSON file, or file containing URLs
-  <MODEL>   LLM model [default: anthropic/claude-sonnet-5] (e.g., 'ollama/llama3.2:3b')
+  <MODEL>   LLM model [default: claude-cli/sonnet] (e.g., 'anthropic/claude-sonnet-5')
 
 Options:
   -l, --length <LENGTH>        Summary length: short, medium, long [default: medium]
@@ -262,7 +262,7 @@ Options:
       --host <HOST>           Host address to bind to [default: 127.0.0.1]
   -p, --port <PORT>           Port to listen on [default: 8000]
       --ollama-host <HOST>    Default Ollama host URL [default: http://localhost:11434]
-      --default-model <MODEL> Default model to use [default: anthropic/claude-sonnet-5]
+      --default-model <MODEL> Default model to use [default: claude-cli/sonnet]
 ```
 
 ## JSON Output Format
@@ -302,6 +302,7 @@ The transcript is split into ~250 word chunks for easy processing.
 
 | Provider | Model Format | Environment Variable |
 |----------|--------------|---------------------|
+| Claude CLI (subscription) | `claude-cli/sonnet` | - (uses `claude` CLI auth) |
 | Ollama (local) | `ollama/model:tag` | - |
 | OpenAI | `openai/gpt-4o-mini` | `OPENAI_API_KEY` |
 | Anthropic | `anthropic/claude-3-haiku-20240307` | `ANTHROPIC_API_KEY` |

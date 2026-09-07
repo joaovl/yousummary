@@ -20,6 +20,10 @@ pub enum LlmProvider {
         api_key: String,
         model: String,
     },
+    /// Local `claude` CLI (Claude subscription auth, no API key)
+    ClaudeCli {
+        model: String,
+    },
     OpenRouter {
         api_key: String,
         model: String,
@@ -66,6 +70,7 @@ impl LlmProvider {
                     base_url: "https://api.openai.com/v1".to_string(),
                 })
             }
+            "claude-cli" => Ok(LlmProvider::ClaudeCli { model }),
             "anthropic" | "claude" => {
                 let key = api_key
                     .map(|s| s.to_string())
@@ -149,6 +154,9 @@ impl LlmClient {
             }
             LlmProvider::Anthropic { api_key, model } => {
                 self.complete_anthropic(api_key, model, prompt, system_prompt).await
+            }
+            LlmProvider::ClaudeCli { model } => {
+                self.complete_claude_cli(model, prompt, system_prompt).await
             }
             LlmProvider::OpenRouter { api_key, model } => {
                 self.complete_openai_compatible(
@@ -277,6 +285,70 @@ impl LlmClient {
     }
 
     /// Complete using Anthropic API
+    /// Run the local `claude` CLI in headless mode. Uses the CLI's own
+    /// subscription credentials, so no API key is involved.
+    async fn complete_claude_cli(
+        &self,
+        model: &str,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, YouSummaryError> {
+        use tokio::io::AsyncWriteExt;
+        use tokio::process::Command;
+
+        let input = match system_prompt {
+            Some(system) => format!("{}
+
+{}", system, prompt),
+            None => prompt.to_string(),
+        };
+
+        debug!("Invoking claude CLI with model {}", model);
+
+        let mut child = Command::new("claude")
+            .args(["-p", "--output-format", "text", "--model", model])
+            .env_remove("ANTHROPIC_API_KEY")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                YouSummaryError::LlmError(format!("Failed to run claude CLI: {}", e))
+            })?;
+
+        child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| YouSummaryError::LlmError("claude CLI stdin unavailable".to_string()))?
+            .write_all(input.as_bytes())
+            .await
+            .map_err(|e| {
+                YouSummaryError::LlmError(format!("Failed to write to claude CLI: {}", e))
+            })?;
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output().await.map_err(|e| {
+            YouSummaryError::LlmError(format!("claude CLI failed: {}", e))
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(YouSummaryError::LlmError(format!(
+                "claude CLI exited with {}: {}",
+                output.status,
+                stderr.trim()
+            )));
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if text.is_empty() {
+            return Err(YouSummaryError::LlmError(
+                "claude CLI returned no output".to_string(),
+            ));
+        }
+        Ok(text)
+    }
+
     async fn complete_anthropic(
         &self,
         api_key: &str,
@@ -406,6 +478,17 @@ struct AnthropicContentBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_claude_cli_model_string() {
+        let provider =
+            LlmProvider::from_model_string("claude-cli/sonnet", "http://localhost:11434", None)
+                .unwrap();
+        match provider {
+            LlmProvider::ClaudeCli { model } => assert_eq!(model, "sonnet"),
+            other => panic!("expected ClaudeCli, got {:?}", other),
+        }
+    }
 
     #[test]
     fn test_parse_model_string() {

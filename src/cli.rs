@@ -55,8 +55,8 @@ pub struct SummarizeArgs {
     #[arg(required = true)]
     pub target: String,
 
-    /// LLM model to use (e.g., 'anthropic/claude-sonnet-5', 'ollama/llama3.2:3b')
-    #[arg(default_value = "anthropic/claude-sonnet-5")]
+    /// LLM model to use (e.g., 'claude-cli/sonnet', 'anthropic/claude-sonnet-5')
+    #[arg(default_value = "claude-cli/sonnet")]
     pub model: String,
 
     /// Summary length: short, medium, or long
@@ -119,7 +119,7 @@ pub struct ServeArgs {
     pub ollama_host: String,
 
     /// Default model to use
-    #[arg(long, default_value = "anthropic/claude-sonnet-5")]
+    #[arg(long, default_value = "claude-cli/sonnet")]
     pub default_model: String,
 }
 
