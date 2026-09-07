@@ -14,7 +14,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use url::Url;
 
 /// Shared state for the web server
@@ -61,6 +61,7 @@ pub async fn start_server(
         .route("/api/summarize", post(handle_summarize))
         .route("/api/health", get(health_check))
         .route("/api/ollama-status", get(check_ollama_status))
+        .route("/api/status", get(service_status))
         .with_state(state);
 
     let addr = format!("{}:{}", host, port);
@@ -84,6 +85,23 @@ async fn health_check() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION")
+    }))
+}
+
+/// Provider half of a `provider/model` string, e.g. "claude-cli/sonnet" -> "claude-cli".
+fn provider_name(model: &str) -> &str {
+    match model.split_once('/') {
+        Some((provider, _)) => provider,
+        None => "unknown",
+    }
+}
+
+/// Report what the server will use when a request omits the model.
+async fn service_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "default_model": state.default_model,
+        "provider": provider_name(&state.default_model),
+        "ollama_host": state.ollama_host,
     }))
 }
 
@@ -151,9 +169,32 @@ async fn handle_summarize(
     State(state): State<Arc<AppState>>,
     Json(request): Json<SummarizeRequest>,
 ) -> Response {
+    let started = std::time::Instant::now();
+    let url = request.url.clone();
+    let model = request
+        .model
+        .clone()
+        .unwrap_or_else(|| state.default_model.clone());
+    info!("summarize: start url={} model={}", url, model);
+
     match process_summarize_request(&state, request).await {
-        Ok(response) => Json(response).into_response(),
+        Ok(response) => {
+            info!(
+                "summarize: done url={} model={} in {:.1}s",
+                url,
+                model,
+                started.elapsed().as_secs_f64()
+            );
+            Json(response).into_response()
+        }
         Err(e) => {
+            error!(
+                "summarize: failed url={} model={} after {:.1}s: {}",
+                url,
+                model,
+                started.elapsed().as_secs_f64(),
+                e
+            );
             let response = SummarizeResponse {
                 success: false,
                 title: None,
@@ -638,6 +679,7 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
         const error = document.getElementById('error');
         const result = document.getElementById('result');
         const submitBtn = document.getElementById('submit-btn');
+        let defaultModel = null;
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -658,8 +700,9 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
                 with_key_points: formData.get('with_key_points') === 'on',
             };
 
+            const startedAt = Date.now();
             log(`Starting summarization for: ${data.url}`);
-            log(`Model: ${data.model || 'default'}, Length: ${data.length}, Language: ${data.language}`);
+            log(`Model: ${data.model || defaultModel || 'server default'}, Length: ${data.length}, Language: ${data.language}`);
 
             try {
                 log('Fetching video info and transcript...');
@@ -671,10 +714,19 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
                     body: JSON.stringify(data),
                 });
 
-                const json = await response.json();
+                const raw = await response.text();
+                let json;
+                try {
+                    json = JSON.parse(raw);
+                } catch (parseErr) {
+                    log(`Server replied HTTP ${response.status} with non-JSON (${raw.length} bytes): ${raw.slice(0, 120).replace(/\s+/g, ' ')}`, 'error');
+                    error.textContent = `Server error (HTTP ${response.status}). The request did not reach the summarizer.`;
+                    error.classList.add('active');
+                    return;
+                }
 
                 if (json.success) {
-                    log(`Success! Title: ${json.title}`, 'info');
+                    log(`Success in ${((Date.now() - startedAt) / 1000).toFixed(1)}s. Title: ${json.title}`, 'info');
                     log(`Channel: ${json.channel || 'Unknown'}`, 'info');
                     document.getElementById('result-title').textContent = json.title || 'Video Summary';
                     document.getElementById('result-channel').textContent = json.channel ? `Channel: ${json.channel}` : '';
@@ -686,8 +738,8 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
                     error.classList.add('active');
                 }
             } catch (err) {
-                log(`Connection failed: ${err.message}`, 'error');
-                error.textContent = 'Failed to connect to the server. Is it running?';
+                log(`Request failed after ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${err.message}`, 'error');
+                error.textContent = `Request failed: ${err.message}`;
                 error.classList.add('active');
             } finally {
                 loading.classList.remove('active');
@@ -745,39 +797,68 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
             statusIndicator.className = 'status-indicator ' + (connected ? 'status-connected' : 'status-disconnected');
         }
 
-        // Check Ollama status on page load
-        async function checkOllamaStatus() {
-            log('Checking Ollama connection...');
+        // Report what the server will actually use, and only probe Ollama when
+        // Ollama is the configured provider.
+        async function checkServiceStatus() {
+            log('Checking summarizer backend...');
+            let status;
+            try {
+                const response = await fetch('/api/status');
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                status = await response.json();
+            } catch (err) {
+                setStatus(false);
+                log(`Cannot reach the yousummary server: ${err.message}`, 'error');
+                return;
+            }
+
+            defaultModel = status.default_model;
+            setStatus(true);
+            log(`Backend ready. Default model: ${status.default_model} (provider: ${status.provider})`, 'info');
+
+            if (status.provider !== 'ollama') return;
+
             try {
                 const response = await fetch('/api/ollama-status');
                 const data = await response.json();
-
                 if (data.connected) {
-                    setStatus(true);
                     log(`Connected to Ollama at ${data.host}`, 'info');
                     if (data.models && data.models.length > 0) {
                         log(`Available models: ${data.models.join(', ')}`, 'info');
                     } else {
                         log('No models found. Run: ollama pull llama3.2:3b', 'warn');
                     }
-                    log(`Default model: ${data.default_model}`, 'info');
                 } else {
                     setStatus(false);
-                    log(`Cannot connect to Ollama at ${data.host}`, 'error');
-                    log(`Error: ${data.error}`, 'error');
+                    log(`Cannot connect to Ollama at ${data.host}: ${data.error}`, 'error');
                     log('Make sure Ollama is running: ollama serve', 'warn');
                 }
             } catch (err) {
-                setStatus(false);
-                log('Failed to check Ollama status', 'error');
-                log(err.message, 'error');
+                log(`Failed to check Ollama status: ${err.message}`, 'warn');
             }
         }
 
         // Run on page load
-        checkOllamaStatus();
+        checkServiceStatus();
         log('youSummary web UI ready', 'info');
     </script>
 </body>
 </html>
 "##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_name_reads_the_model_prefix() {
+        assert_eq!(provider_name("claude-cli/sonnet"), "claude-cli");
+        assert_eq!(provider_name("ollama/llama3.2:3b"), "ollama");
+        assert_eq!(provider_name("anthropic/claude-sonnet-5"), "anthropic");
+    }
+
+    #[test]
+    fn provider_name_falls_back_when_there_is_no_prefix() {
+        assert_eq!(provider_name("sonnet"), "unknown");
+    }
+}

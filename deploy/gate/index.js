@@ -1,5 +1,5 @@
 import express from "express";
-import { createProxyMiddleware } from "http-proxy-middleware";
+import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 import { authenticator } from "otplib";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -504,8 +504,19 @@ app.use(
     target: UPSTREAM,
     changeOrigin: true,
     ws: false,
-    proxyTimeout: 120_000,
-    timeout: 120_000,
+    // Summaries run a `claude` CLI call upstream; minutes, not seconds.
+    proxyTimeout: 600_000,
+    timeout: 600_000,
+    on: {
+      // express.json() above already drained the request stream, so the proxy
+      // would forward a bodyless POST and hang until proxyTimeout. Re-stream it.
+      proxyReq: fixRequestBody,
+      error: (err, req, res) => {
+        console.error(`[gate] proxy error on ${req.method} ${req.url}: ${err.message}`);
+        if (res.headersSent || typeof res.status !== "function") return;
+        res.status(502).json({ error: `upstream unreachable: ${err.message}` });
+      },
+    },
   }),
 );
 

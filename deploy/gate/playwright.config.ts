@@ -33,7 +33,7 @@ export default defineConfig({
       MEETINGS_COOKIE_SECURE: "0",
       NODE_ENV: "test",
       PORT: String(PORT),
-      UPSTREAM: "http://127.0.0.1:1",
+      UPSTREAM: "http://127.0.0.1:8198",
     },
   },
 });
